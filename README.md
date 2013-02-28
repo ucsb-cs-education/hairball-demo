@@ -1,7 +1,9 @@
-A simple flask app that runs on heroku and demonstrates HTML Server-Sent Events
-(EventSource) protocol.
+Hairball Demo is a simple web service that demonstrates Hairball, the
+lint-inspired static analysis tool for Scratch.
 
-See running demo at (warning: most likely NSFW):
-http://bboe-image.herokuapp.com/
+A running version of the Hairball Demo web service can be found at:
+http://hairball.herokuapp.com
 
-Inspired by: https://github.com/jkbr/chat
+The Hairball source is located at:
+https://github.com/ucsb-cs-education/hairball
+
