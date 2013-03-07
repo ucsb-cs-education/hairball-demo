@@ -84,9 +84,13 @@ def safe_addr(ip_addr):
 
 
 def format_broadcast_receive_results(results):
-    import pprint
-    pprint.pprint(results)
-    return 'foobar'
+    retval = ''
+    for category, events in sorted(results['broadcast'].items()):
+        if events:
+            event_list = ''.join(['<li>{0}</li>'.format(x) for x in sorted(events)])
+            retval += ('<div>Category: "{0}" events <ul>{1}</ul></div>'
+                       .format(category, event_list))
+    return retval
 
 
 def format_initialization_results(results):
