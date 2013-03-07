@@ -174,7 +174,7 @@ def post():
                                   'ip_addr': safe_addr(flask.request.access_route[0])})
             broadcast(message)  # Notify subscribers of completion
     except Exception as e:  # Output errors
-        return '{0}'.format(e)
+        return 'There was error running one of the plugins. Please <a href="https://github.com/ucsb-cs-education/hairball-demo/issues">report</a> this issue.'
     return 'success'
 
 
