@@ -88,8 +88,14 @@ def format_broadcast_receive_results(results):
     for category, events in sorted(results['broadcast'].items()):
         if events:
             event_list = ''.join(['<li>{0}</li>'.format(x) for x in sorted(events)])
-            retval += ('<div>Category: "{0}" events <ul>{1}</ul></div>'
-                       .format(category, event_list))
+            if category == 'success':
+                color = 'blue'
+            elif 'never' in category:
+                color = 'red'
+            else:
+                color = 'grey'
+            retval += ('<div>Category: "<span style="color: {0}">{1}</span>" events <ul>{2}</ul></div>'
+                       .format(color, category, event_list))
     return retval
 
 
@@ -99,11 +105,12 @@ def format_initialization_results(results):
         failed = [x for x in result if result[x] == 1]  # 1 is STATE_MODIFIED
 
         if failed:
-            info = '- FAIL <ul>{0}</ul>'.format(
-                ''.join(['<li>{0}</li>'.format(x) for x in sorted(failed)]))
+            retval += ('<div><span style="color: red">FAIL</span> -- Sprite: {0} (non-initialized attributes listed below)<ul>{1}</ul></div>'
+                       .format(sprite, ''.join(['<li>{0}</li>'.format(x)
+                                                for x in sorted(failed)])))
         else:
-            info = 'PASS'
-        retval += '<div>Sprite: {0} -- {1}</div>\n'.format(sprite, info)
+            retval += ('<div><span style="color: blue">PASS</span> -- Sprite: {0}</div>'
+                       .format(sprite))
     return retval
 
 
@@ -196,6 +203,7 @@ def home():
     retval = """
 <!doctype html>
 <title>Scratch Uploader (Hairball Demo)</title>
+
 <meta charset="utf-8" />
 %s
 
@@ -248,6 +256,13 @@ def home():
 
 </style>
 <h3>Scratch Uploader (Hairball Demo)</h3>
+
+<p>The Hairball paper and presentation slides can be
+found <a href="http://cs.ucsb.edu/~bboe/p/cv#sigcse13">here</a>.</p>
+
+<p>Both <a href="https://github.com/ucsb-cs-education/hairball">Hairball's</a> source and the source for this <a href="https://github.com/ucsb-cs-education/hairball-demo">Hairball demo</a> Flask application can be found on github.</p>
+
+
 <noscript>Note: You must have javascript enabled in order to upload and
 dynamically view new projects.</noscript>
 <fieldset>
