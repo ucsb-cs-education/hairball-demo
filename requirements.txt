@@ -8,5 +8,6 @@ gevent==0.13.8
 greenlet==0.4.0
 gunicorn==0.17.2
 kurt==1.4.6
+hairball==0.1b
 ply==3.4
 wsgiref==0.1.2

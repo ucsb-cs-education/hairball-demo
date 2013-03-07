@@ -3,10 +3,10 @@ import json
 import kurt
 import os
 import time
-from gevent.event import AsyncResult, Timeout
-from gevent.queue import Empty, Queue
-from shutil import rmtree
+from hairball import Hairball
 from hashlib import sha1
+from pprint import pformat
+from shutil import copytree, rmtree
 from stat import S_ISREG, ST_CTIME, ST_MODE
 
 
@@ -16,14 +16,30 @@ MAX_PROJECTS = 10
 MAX_DURATION = 300
 
 app = flask.Flask(__name__, static_folder=DATA_DIR)
-broadcast_queue = Queue()
 
 
-try:  # Reset saved files on each start
-    rmtree(DATA_DIR, True)
-    os.mkdir(DATA_DIR)
-except OSError:
-    pass
+if __name__ != '__main__':
+    from gevent.event import AsyncResult, Timeout
+    from gevent.queue import Empty, Queue
+    PRODUCTION = True
+    INCLUDES = """<script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+<script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.1/jquery-ui.min.js"></script>
+<link rel="stylesheet" href="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.1/themes/vader/jquery-ui.css" />"""
+    broadcast_queue = Queue()
+    # Make DATA_DIR if it does not already exist
+    try:
+        os.mkdir(DATA_DIR)
+    except OSError:
+        pass
+else:
+    STATIC_DIR = 'static'
+    PRODUCTION = False
+    INCLUDES = """<script src="/data/jquery.min.js"></script>
+<script src="/data/jquery-ui.min.js"></script>
+<link rel="stylesheet" href="/data/jquery-ui.css" />"""
+    # Copy static files (and created DATA_DIR) if it doesn't exist
+    if not os.path.isdir(DATA_DIR):
+        copytree(STATIC_DIR, DATA_DIR)
 
 
 def broadcast(message):
@@ -67,14 +83,64 @@ def safe_addr(ip_addr):
     return '.'.join(ip_addr.split('.')[:2] + ['xxx', 'xxx'])
 
 
-def save_thumbnail(path, data):
+def format_broadcast_receive_results(results):
+    import pprint
+    pprint.pprint(results)
+    return 'foobar'
+
+
+def format_initialization_results(results):
+    retval = ''
+    for sprite, result in sorted(results['initialized'].items()):
+        failed = [x for x in result if result[x] == 1]  # 1 is STATE_MODIFIED
+
+        if failed:
+            info = '- FAIL <ul>{0}</ul>'.format(
+                ''.join(['<li>{0}</li>'.format(x) for x in sorted(failed)]))
+        else:
+            info = 'PASS'
+        retval += '<div>Sprite: {0} -- {1}</div>\n'.format(sprite, info)
+    return retval
+
+
+def process_scratch(path, data):
     scratch = kurt.ScratchProjectFile(path, load=False)
     scratch._load(data)
-    scratch.info['thumbnail'].save(path)
+    # Setup hairball
+    hairball = Hairball(['-p', 'initialization.AttributeInitialization',
+                         '-p', 'checks.BroadcastReceive', 'dummy'])
+    hairball.initialize_plugins()
+    # Create the results directory (if it doesn't already exist)
+    try:
+        os.mkdir(path)
+    except OSError:
+        pass
+    # Save thumbnail
+    scratch.info['thumbnail'].save(os.path.join(path, 'thumbnail.jpg'))
+
+    # Create template
+    with open(os.path.join(path, 'index.html'), 'w') as fp:
+        fp.write("""<img src="/{path}/thumbnail.jpg" />""".format(path=path))
+        # Run the plugins
+        for plugin in hairball.plugins:
+            name = plugin.__class__.__name__
+            results = plugin._process(scratch)
+            if name == 'AttributeInitialization':
+                name = 'Initialization'
+                retval = format_initialization_results(results)
+            elif name == 'BroadcastReceive':
+                name = 'Broadcast and Receive'
+                retval = format_broadcast_receive_results(results)
+            else:
+                retval = 'Unknown plugin'
+            fp.write('<div class="plugin"><h3>Plugin: {name}</h3>\n{contents}</div>'
+                     .format(name=name, contents=retval))
     return True
 
 
 def event_stream(client):
+    if not PRODUCTION:
+        return
     force_disconnect = False
     try:
         for message in receive():
@@ -89,11 +155,11 @@ def event_stream(client):
 @app.route('/post', methods=['POST'])
 def post():
     sha1sum = sha1(flask.request.data).hexdigest()
-    target = os.path.join(DATA_DIR, '{0}.jpg'.format(sha1sum))
+    target = os.path.join(DATA_DIR, '{0}'.format(sha1sum))
     message = json.dumps({'src': target,
                           'ip_addr': safe_addr(flask.request.access_route[0])})
     try:
-        if save_thumbnail(target, flask.request.data):
+        if process_scratch(target, flask.request.data) and PRODUCTION:
             broadcast(message)  # Notify subscribers of completion
     except Exception as e:  # Output errors
         raise
@@ -110,27 +176,25 @@ def stream():
 @app.route('/')
 def home():
     # Code adapted from: http://stackoverflow.com/questions/168409/
-    image_infos = []
+    infos = []
     for filename in os.listdir(DATA_DIR):
         filepath = os.path.join(DATA_DIR, filename)
-        file_stat = os.stat(filepath)
-        if S_ISREG(file_stat[ST_MODE]):
-            image_infos.append((file_stat[ST_CTIME], filepath))
-
-    images = []
-    for i, (_, path) in enumerate(sorted(image_infos, reverse=True)):
-        if i >= MAX_PROJECTS:
-            os.unlink(path)
+        if os.path.isdir(filepath) and filename != 'images':
+            file_stat = os.stat(filepath)
+            infos.append((file_stat[ST_CTIME], filepath))
+    scratch_files = []
+    for i, (_, path) in enumerate(sorted(infos, reverse=True)):
+        index = os.path.join(path, 'index.html')
+        if i >= MAX_PROJECTS or not os.path.isfile(index):
+            rmtree(path)
             continue
-        images.append('<div><img alt="User uploaded image" src="{0}" /></div>'
-                      .format(path))
-    return """
+        scratch_files.append('<div class="analysis">{0}</div>'.format(open(index).read()))
+    retval = """
 <!doctype html>
 <title>Scratch Uploader (Hairball Demo)</title>
 <meta charset="utf-8" />
-<script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
-<script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.1/jquery-ui.min.js"></script>
-<link rel="stylesheet" href="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.1/themes/vader/jquery-ui.css" />
+%s
+
 <style>
   body {
     max-width: 800px;
@@ -148,6 +212,15 @@ def home():
 
   .notice {
     font-size: 80%%;
+  }
+
+  .analysis {
+    border: 3px solid white;
+  }
+
+  .plugin {
+    text-align: left;
+    border: 1px dashed white;
   }
 
 
@@ -242,8 +315,12 @@ dynamically view new projects.</noscript>
       file_select_handler(e.target.files[0]);
       e.target.value = '';
   });
+</script>
+""" % (INCLUDES, '\n'.join(scratch_files))
+    if PRODUCTION:
+        retval += """
+<script>
   sse();
-
   var _gaq = _gaq || [];
   _gaq.push(['_setAccount', 'UA-510348-18']);
   _gaq.push(['_trackPageview']);
@@ -254,7 +331,8 @@ dynamically view new projects.</noscript>
     var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
   })();
 </script>
-""" % '\n'.join(images)
+"""
+    return retval
 
 
 if __name__ == '__main__':
