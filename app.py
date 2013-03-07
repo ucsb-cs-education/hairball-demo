@@ -156,13 +156,13 @@ def event_stream(client):
 def post():
     sha1sum = sha1(flask.request.data).hexdigest()
     target = os.path.join(DATA_DIR, '{0}'.format(sha1sum))
-    message = json.dumps({'src': target,
-                          'ip_addr': safe_addr(flask.request.access_route[0])})
     try:
         if process_scratch(target, flask.request.data) and PRODUCTION:
+            message = json.dumps({'data': open(os.path.join(target,
+                                                            'index.html')).read(),
+                                  'ip_addr': safe_addr(flask.request.access_route[0])})
             broadcast(message)  # Notify subscribers of completion
     except Exception as e:  # Output errors
-        raise
         return '{0}'.format(e)
     return 'success'
 
@@ -262,12 +262,12 @@ dynamically view new projects.</noscript>
               return;
           var data = $.parseJSON(e.data);
           var upload_message = 'Project uploaded by ' + data['ip_addr'];
-          var image = $('<img>', {alt: upload_message, src: data['src']});
-          var container = $('<div>').hide();
+          var body = $(data['data']);
+          var container = $('<div class="analysis">').hide();
           container.append($('<div>', {text: upload_message}));
-          container.append(image);
+          container.append(body);
           $('#projects').prepend(container);
-          image.load(function(){
+          body.load(function(){
               container.show('blind', {}, 1000);
           });
       };
