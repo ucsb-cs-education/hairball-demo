@@ -304,6 +304,10 @@ dynamically view new projects.</noscript>
               progressbar.progressbar('option', 'max', e1.total);
           progressbar.progressbar('value', e1.loaded);
       });
+      xhr.upload.addEventListener('load', function(e1){
+          status.text('processing');
+          progressbar.progressbar({value: false});
+      });
       xhr.onreadystatechange = function(e1) {
           if (this.readyState == 4)  {
               if (this.status == 200)
