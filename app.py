@@ -3,11 +3,13 @@ import json
 import kurt
 import os
 import time
+from cStringIO import StringIO
+from collections import namedtuple
 from hairball import Hairball
 from hashlib import sha1
-from pprint import pformat
 from shutil import copytree, rmtree
-from stat import S_ISREG, ST_CTIME, ST_MODE
+from stat import ST_CTIME
+from traceback import print_exc
 
 
 DATA_DIR = 'data'
@@ -16,6 +18,8 @@ MAX_PROJECTS = 10
 MAX_DURATION = 300
 
 app = flask.Flask(__name__, static_folder=DATA_DIR)
+
+Option = namedtuple('Option', ['kurt_plugin', 'quiet', 'plugin'])
 
 
 if __name__ != '__main__':
@@ -87,14 +91,16 @@ def format_broadcast_receive_results(results):
     retval = ''
     for category, events in sorted(results['broadcast'].items()):
         if events:
-            event_list = ''.join(['<li>{0}</li>'.format(x) for x in sorted(events)])
+            event_list = ''.join(['<li>{0}</li>'.format(x)
+                                  for x in sorted(events)])
             if category == 'success':
                 color = 'blue'
             elif 'never' in category:
                 color = 'red'
             else:
                 color = 'grey'
-            retval += ('<div>Category: "<span style="color: {0}">{1}</span>" events <ul>{2}</ul></div>'
+            retval += ('<div>Category: "<span style="color: {0}">{1}</span>" '
+                       'events <ul>{2}</ul></div>'
                        .format(color, category, event_list))
     return retval
 
@@ -105,29 +111,35 @@ def format_initialization_results(results):
         failed = [x for x in result if result[x] == 1]  # 1 is STATE_MODIFIED
 
         if failed:
-            retval += ('<div><span style="color: red">FAIL</span> -- Sprite: {0} (non-initialized attributes listed below)<ul>{1}</ul></div>'
+            retval += ('<div><span style="color: red">FAIL</span> -- Sprite: '
+                       '{0} (non-initialized attributes listed below)<ul>{1}'
+                       '</ul></div>'
                        .format(sprite, ''.join(['<li>{0}</li>'.format(x)
                                                 for x in sorted(failed)])))
         else:
-            retval += ('<div><span style="color: blue">PASS</span> -- Sprite: {0}</div>'
-                       .format(sprite))
+            retval += ('<div><span style="color: blue">PASS</span> -- Sprite: '
+                       '{0}</div>'.format(sprite))
     return retval
 
 
-def process_scratch(path, data):
-    scratch = kurt.ScratchProjectFile(path, load=False)
-    scratch._load(data)
+def process_scratch(path, data, file_format):
+    scratch = kurt.Project.load(data, format=file_format)
     # Setup hairball
-    hairball = Hairball(['-p', 'initialization.AttributeInitialization',
-                         '-p', 'checks.BroadcastReceive', 'dummy'])
+
+    options = Option(kurt_plugin=None, quiet=False,
+                     plugin=['initialization.AttributeInitialization',
+                             'checks.BroadcastReceive'])
+
+    hairball = Hairball(options, None)
     hairball.initialize_plugins()
     # Create the results directory (if it doesn't already exist)
     try:
         os.mkdir(path)
     except OSError:
         pass
-    # Save thumbnail
-    scratch.info['thumbnail'].save(os.path.join(path, 'thumbnail.jpg'))
+    # Save thumbnail if scratch14
+    if file_format == 'scratch14':
+        scratch.thumbnail.save(os.path.join(path, 'thumbnail.jpg'))
 
     # Create template
     with open(os.path.join(path, 'index.html'), 'w') as fp:
@@ -135,7 +147,7 @@ def process_scratch(path, data):
         # Run the plugins
         for plugin in hairball.plugins:
             name = plugin.__class__.__name__
-            results = plugin._process(scratch)
+            results = plugin._process(scratch, filename=None)
             if name == 'AttributeInitialization':
                 name = 'Initialization'
                 retval = format_initialization_results(results)
@@ -144,8 +156,8 @@ def process_scratch(path, data):
                 retval = format_broadcast_receive_results(results)
             else:
                 retval = 'Unknown plugin'
-            fp.write('<div class="plugin"><h3>Plugin: {name}</h3>\n{contents}</div>'
-                     .format(name=name, contents=retval))
+            fp.write('<div class="plugin"><h3>Plugin: {name}</h3>\n{contents}'
+                     '</div>'.format(name=name, contents=retval))
     return True
 
 
@@ -167,14 +179,21 @@ def event_stream(client):
 def post():
     sha1sum = sha1(flask.request.data).hexdigest()
     target = os.path.join(DATA_DIR, '{0}'.format(sha1sum))
+    data = StringIO(flask.request.data)
+    file_format = 'scratch14' if flask.request.data.startswith('ScratchV02') \
+        else 'scratch20'
     try:
-        if process_scratch(target, flask.request.data) and PRODUCTION:
-            message = json.dumps({'data': open(os.path.join(target,
-                                                            'index.html')).read(),
-                                  'ip_addr': safe_addr(flask.request.access_route[0])})
+        if process_scratch(target, data, file_format) and PRODUCTION:
+            with open(os.path.join(target, 'index.html')) as fp:
+                message = json.dumps(
+                    {'data': fp.read(),
+                     'ip_addr': safe_addr(flask.request.access_route[0])})
             broadcast(message)  # Notify subscribers of completion
-    except Exception as e:  # Output errors
-        return 'There was error running one of the plugins. Please <a href="https://github.com/ucsb-cs-education/hairball-demo/issues">report</a> this issue.'
+    except Exception as exc:  # Output errors
+        print_exc()
+        return ('There was error running one of the plugins. Please <a href="'
+                'https://github.com/ucsb-cs-education/hairball-demo/issues">'
+                'report</a> this issue: {}'.format(exc))
     return 'success'
 
 
@@ -199,7 +218,8 @@ def home():
         if i >= MAX_PROJECTS or not os.path.isfile(index):
             rmtree(path)
             continue
-        scratch_files.append('<div class="analysis">{0}</div>'.format(open(index).read()))
+        scratch_files.append('<div class="analysis">{0}</div>'
+                             .format(open(index).read()))
     retval = """
 <!doctype html>
 <title>Scratch Uploader (Hairball Demo)</title>
@@ -260,7 +280,10 @@ def home():
 <p>The Hairball paper and presentation slides can be
 found <a href="http://cs.ucsb.edu/~bboe/p/cv#sigcse13">here</a>.</p>
 
-<p>Both <a href="https://github.com/ucsb-cs-education/hairball">Hairball's</a> source and the source for this <a href="https://github.com/ucsb-cs-education/hairball-demo">Hairball demo</a> Flask application can be found on github.</p>
+<p>Both <a href="https://github.com/ucsb-cs-education/hairball">Hairball's</a>
+source and the source for this
+<a href="https://github.com/ucsb-cs-education/hairball-demo">Hairball demo</a>
+Flask application can be found on github.</p>
 
 
 <noscript>Note: You must have javascript enabled in order to upload and
