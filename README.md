@@ -1,3 +1,13 @@
+## See Dr. Scratch
+
+I am no longer maintaining this project. The source will remain available, however, the heroku instance will not.
+
+For a more up-to-date project please see:
+
+http://drscratch.org/
+
+---
+
 Hairball Demo is a simple web service that demonstrates Hairball, the
 lint-inspired static analysis tool for Scratch. The paper and presentation
 slides for Hairball can be found at: http://cs.ucsb.edu/~bboe/p/cv#sigcse13
